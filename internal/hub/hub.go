@@ -19,22 +19,20 @@ type Client struct {
 
 // Hub maintains the set of active clients and broadcasts messages to them.
 type Hub struct {
-	Clients     map[*Client]bool
-	ClientsById map[string]*Client
-	Broadcast   chan []byte
-	Register    chan *Client
-	Unregister  chan *Client
-	mu          sync.Mutex
+	Clients    map[string]*Client
+	Broadcast  chan []byte
+	Register   chan *Client
+	Unregister chan *Client
+	mu         sync.Mutex
 }
 
 // NewHub creates a new Hub instance.
 func NewHub() *Hub {
 	return &Hub{
-		Clients:     make(map[*Client]bool),
-		ClientsById: make(map[string]*Client),
-		Broadcast:   make(chan []byte),
-		Register:    make(chan *Client),
-		Unregister:  make(chan *Client),
+		Clients:    make(map[string]*Client),
+		Broadcast:  make(chan []byte),
+		Register:   make(chan *Client),
+		Unregister: make(chan *Client),
 	}
 }
 
@@ -44,18 +42,12 @@ func (h *Hub) Run() {
 		select {
 		case client := <-h.Register:
 			h.mu.Lock()
-			h.Clients[client] = true
-			h.ClientsById[client.Id] = client
+			h.Clients[client.Id] = client
 			h.mu.Unlock()
 		case client := <-h.Unregister:
 			h.mu.Lock()
-			if _, ok := h.Clients[client]; ok {
-				delete(h.Clients, client)
-				if client.Id != "" {
-					if idClient, ok := h.ClientsById[client.Id]; ok && idClient == client {
-						delete(h.ClientsById, client.Id)
-					}
-				}
+			if _, ok := h.Clients[client.Id]; ok {
+				delete(h.Clients, client.Id)
 				close(client.Send)
 			}
 			h.mu.Unlock()
@@ -72,38 +64,34 @@ func (h *Hub) Run() {
 				fmt.Printf("error unmarshaling message: %v\n", err)
 				continue
 			}
+
 			h.mu.Lock()
 			if msg.IsBroadcast {
 				fmt.Println("broadcasting message to all clients")
-				for client := range h.Clients {
+				for clientId, client := range h.Clients {
+					if clientId == msg.Sender {
+						continue
+					}
+
+					fmt.Println("sending message to client", client.Id)
 					select {
-					case client.Send <- msg.Content:
+					case client.Send <- message:
 						fmt.Println("sent message to client:", client.Id)
 					default:
 						// remove slow/unresponsive client
 						close(client.Send)
-						delete(h.Clients, client)
-						if client.Id != "" {
-							if idc, ok := h.ClientsById[client.Id]; ok && idc == client {
-								delete(h.ClientsById, client.Id)
-							}
-						}
+						delete(h.Clients, client.Id)
 					}
 				}
 			} else {
 				fmt.Println("sending message to client:", msg.Receiver)
-				if target, ok := h.ClientsById[msg.Receiver]; ok {
+				if target, ok := h.Clients[msg.Receiver]; ok {
 					select {
-					case target.Send <- msg.Content:
+					case target.Send <- []byte(msg.Content):
 					default:
 						// remove slow/unresponsive target
 						close(target.Send)
-						delete(h.Clients, target)
-						if target.Id != "" {
-							if idc, ok := h.ClientsById[target.Id]; ok && idc == target {
-								delete(h.ClientsById, target.Id)
-							}
-						}
+						delete(h.Clients, target.Id)
 					}
 				}
 			}

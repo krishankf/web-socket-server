@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 
@@ -36,6 +35,16 @@ func HandleWebSocket(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 
 	h.Register <- client
 
+	go func(c *hub.Client) {
+		for message := range c.Send {
+			err := c.Conn.WriteMessage(websocket.TextMessage, message)
+			if err != nil {
+				fmt.Println("error writing message to client:", err)
+				return
+			}
+		}
+	}(client)
+
 	for {
 		_, msg, err := conn.ReadMessage()
 		fmt.Println("message received at handler:", string(msg))
@@ -44,13 +53,7 @@ func HandleWebSocket(h *hub.Hub, w http.ResponseWriter, r *http.Request) {
 			break
 		}
 
-		decodedMsg, err := base64.StdEncoding.DecodeString(string(msg))
-		if err != nil {
-			fmt.Printf("error decoding base64 message: %v\n", err)
-			continue
-		}
-
-		h.Broadcast <- decodedMsg
+		h.Broadcast <- msg
 		continue
 	}
 }
